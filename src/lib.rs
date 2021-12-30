@@ -1,6 +1,6 @@
+use std::env;
 use std::error::Error;
 use std::fs;
-use std::env;
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let contents = fs::read_to_string(config.filename)?;
@@ -21,56 +21,59 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 pub struct Config {
     pub query: String,
     pub filename: String,
-    pub case_sensitive: bool
+    pub case_sensitive: bool,
 }
 
 impl Config {
-    pub fn new(args: &[String]) -> Result<Config, &str> {
-        if args.len() < 3 {
-            return Err("not enough arguments");
-        }
+    pub fn new<T>(mut args: T) -> Result<Config, &'static str>
+        where T: Iterator<Item=String> 
+    {
+        args.next();
 
-        let query = args[1].clone();
-        let filename = args[2].clone();
-        let case_sensitive = Config::is_case_sensitive(args);
+        let query = match args.next() {
+            Some(arg) => arg,
+            None => return Err("Didn't get a query string")
+        };
+        let filename = match args.next() {
+            Some(arg) => arg,
+            None => return Err("Didn't get a file name")
+        };
+        let case_sensitive = Config::is_case_sensitive(&mut args);
 
-        Ok(Config { query, filename, case_sensitive })
+        Ok(Config {
+            query,
+            filename,
+            case_sensitive,
+        })
     }
 
     // Checks ENV and cmd args
     // Cmd args take precedence
-    fn is_case_sensitive(args: &[String]) -> bool {
-        if args.len() == 4 && args[3] == "-c" {
-            false
-        } else {
-            env::var("CASE_INSENSITIVE").is_err()
-        }
+    fn is_case_sensitive<T>(args: &mut T) -> bool 
+        where T: Iterator<Item=String>
+    {
+        if let Some(v) = args.next() {
+            if v == "-c" {
+                return false;
+            }
+        };
+
+        env::var("CASE_INSENSITIVE").is_err()
     }
 }
 
 pub fn search<'a>(query: &str, contents: &'a str) -> Vec<&'a str> {
-    let mut results = Vec::new();
-
-    for line in contents.lines() {
-        if line.contains(query) {
-            results.push(line);
-        }
-    }
-
-    results
+    contents
+        .lines()
+        .filter(|line| line.contains(query))
+        .collect()
 }
 
 pub fn search_case_insensitive<'a>(query: &str, contents: &'a str) -> Vec<&'a str> {
-    let query = query.to_lowercase();
-    let mut results = Vec::new();
-
-    for line in contents.lines() {
-        if line.to_lowercase().contains(&query) {
-            results.push(line);
-        }
-    }
-
-    results
+    contents
+        .lines()
+        .filter(|line| line.to_lowercase().contains(&query.to_lowercase()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -84,7 +87,7 @@ mod tests {
             String::from("query"),
             String::from("filename"),
         ];
-        let config = Config::new(&args).unwrap();
+        let config = Config::new(args.into_iter()).unwrap();
 
         assert_eq!("query", config.query);
         assert_eq!("filename", config.filename)
@@ -93,7 +96,7 @@ mod tests {
     #[test]
     fn confignew_passing_too_little_arguments_returns_error() {
         let args = [String::from("exe"), String::from("query")];
-        let result = Config::new(&args);
+        let result = Config::new(args.into_iter());
 
         if let Ok(_) = result {
             panic!("The returned result should be invalid");
@@ -107,7 +110,7 @@ mod tests {
             String::from("query"),
             String::from("nonexistingfile.txt"),
         ];
-        let config = Config::new(&args).unwrap();
+        let config = Config::new(args.into_iter()).unwrap();
 
         if let Ok(()) = run(config) {
             panic!("A non-existing file was passed so result should not be Ok")
@@ -121,7 +124,7 @@ mod tests {
             String::from("query"),
             String::from("poem.txt"),
         ];
-        let config = Config::new(&args).unwrap();
+        let config = Config::new(args.into_iter()).unwrap();
 
         if let Err(_) = run(config) {
             panic!("An existing file was passed so result should be Ok")
